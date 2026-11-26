@@ -79,8 +79,8 @@ struct ContentView: View {
     @AppStorage("untis.mobile.showRooms") private var showRooms = true
     @AppStorage("untis.mobile.showSubjectColours") private var showSubjectColours = true
 
-    private let timeColumnWidth: CGFloat = 46
-    private let periodRowHeight: CGFloat = 82
+    private let timeColumnWidth: CGFloat = 42
+    private let periodRowHeight: CGFloat = 58
 
     var body: some View {
         ZStack {
@@ -100,7 +100,7 @@ struct ContentView: View {
                     SecondaryTabScreen(tab: selectedTab)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background(UntisPalette.timetableBackground.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -510,15 +510,15 @@ struct ContentView: View {
                             .resizable()
                             .renderingMode(.template)
                             .scaledToFit()
-                            .frame(width: 27, height: 27)
+                            .frame(width: 25, height: 25)
                             .foregroundStyle(.white)
                         Text(tab.rawValue)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10.5, weight: .semibold))
                             .lineLimit(1)
                             .foregroundStyle(.white)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 72)
+                    .frame(height: 56)
                     .background {
                         if selectedTab == tab {
                             Capsule(style: .continuous)
@@ -533,20 +533,13 @@ struct ContentView: View {
             }
         }
         .padding(4)
-        .frame(maxWidth: 350)
+        .frame(maxWidth: 290)
         .modifier(UntisLiquidGlassCapsule())
-        .padding(.horizontal, 24)
-        .padding(.top, 6)
-        .padding(.bottom, 7)
+        .padding(.horizontal, 18)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity)
-        .background {
-            LinearGradient(
-                colors: [UntisPalette.timetableBackground.opacity(0), UntisPalette.timetableBackground.opacity(0.82)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea(edges: .bottom)
-        }
+        .background(Color.clear)
     }
 
     // MARK: Date helpers and tap behavior
@@ -631,11 +624,11 @@ private struct PeriodTimeCell: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(UntisPalette.title)
             Text(period.startTime)
-                .font(.system(size: 8, weight: .regular, design: .rounded))
+                .font(.system(size: 9, weight: .regular, design: .rounded))
                 .foregroundStyle(UntisPalette.subtitle)
             Rectangle().fill(UntisPalette.separator).frame(width: 25, height: 0.6)
             Text(period.endTime)
-                .font(.system(size: 8, weight: .regular, design: .rounded))
+                .font(.system(size: 9, weight: .regular, design: .rounded))
                 .foregroundStyle(UntisPalette.subtitle)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -737,16 +730,14 @@ private struct LessonCardView: View {
 
     private var cardBackground: Color {
         switch lesson.status {
-        case .normal: return showSubjectColours ? Color(hex: lesson.subjectColorHex) : UntisPalette.surface
-        case .cancelled: return UntisPalette.cancelledBackground
-        case .roomChange, .substitution: return UntisPalette.changeBackground
-        case .exam: return UntisPalette.examBackground
+        case .normal, .cancelled, .roomChange, .substitution, .exam:
+            return UntisPalette.lessonBackground
         }
     }
 
     private var statusAccent: Color {
         switch lesson.status {
-        case .normal: return Color(hex: lesson.subjectColorHex).darker(by: 0.24)
+        case .normal: return showSubjectColours ? Color(hex: lesson.subjectColorHex).darker(by: 0.24) : UntisPalette.lessonBorder
         case .cancelled: return UntisPalette.cancelledBorder
         case .roomChange, .substitution: return UntisPalette.changeBorder
         case .exam: return UntisPalette.examBorder
@@ -755,8 +746,8 @@ private struct LessonCardView: View {
 
     private var cardBorder: Color {
         switch lesson.status {
-        case .normal: return UntisPalette.separator.opacity(0.55)
-        case .cancelled: return UntisPalette.cancelledBorder.opacity(0.65)
+        case .normal: return UntisPalette.lessonBorder
+        case .cancelled: return UntisPalette.cancelledBorder.opacity(0.75)
         case .roomChange, .substitution: return UntisPalette.changeBorder.opacity(0.65)
         case .exam: return UntisPalette.examBorder.opacity(0.65)
         }
@@ -801,7 +792,7 @@ private struct LessonCardView: View {
 
             HStack(spacing: 2) {
                 Text(lesson.subject.isEmpty ? "—" : lesson.subject)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
                     .strikethrough(isCancelled)
@@ -813,11 +804,11 @@ private struct LessonCardView: View {
                         .opacity(0.65)
                 }
             }
-            .foregroundStyle(isCancelled ? UntisPalette.cancelledText : UntisPalette.title)
+            .foregroundStyle(isCancelled ? UntisPalette.cancelledText : UntisPalette.lessonTitle)
 
             HStack(spacing: 2) {
                 Text(lesson.teacher.isEmpty ? "—" : lesson.teacher)
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
                     .strikethrough(isCancelled)
@@ -829,7 +820,7 @@ private struct LessonCardView: View {
                         .opacity(0.65)
                 }
             }
-            .foregroundStyle(isCancelled ? UntisPalette.cancelledText.opacity(0.82) : UntisPalette.subtitle)
+            .foregroundStyle(isCancelled ? UntisPalette.cancelledText.opacity(0.82) : UntisPalette.lessonSubtitle)
 
             if showRooms {
                 roomRow
@@ -867,11 +858,11 @@ private struct LessonCardView: View {
         if lesson.status == .roomChange {
             HStack(spacing: 3) {
                 Text(lesson.room.isEmpty ? "—" : lesson.room)
-                    .font(.system(size: 7.5, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .lineLimit(1)
                     .padding(.horizontal, 3)
                     .padding(.vertical, 1)
-                    .background(UntisPalette.surface.opacity(0.85))
+                    .background(UntisPalette.changeBorder)
                     .clipShape(RoundedRectangle(cornerRadius: 2))
                 if !lesson.originalRoom.isEmpty {
                     Text(lesson.originalRoom)
@@ -881,13 +872,13 @@ private struct LessonCardView: View {
                         .foregroundStyle(UntisPalette.subtitle)
                 }
             }
-            .foregroundStyle(UntisPalette.title)
+            .foregroundStyle(Color.black.opacity(0.88))
         } else {
             Text(lesson.room.isEmpty ? "—" : lesson.room)
-                .font(.system(size: 7.5, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .lineLimit(1)
                 .strikethrough(isCancelled)
-                .foregroundStyle(isCancelled ? UntisPalette.cancelledText.opacity(0.8) : UntisPalette.subtitle)
+                .foregroundStyle(isCancelled ? UntisPalette.cancelledText.opacity(0.8) : UntisPalette.lessonSubtitle)
         }
     }
 }
@@ -1612,7 +1603,7 @@ private struct InfoSheet: View {
 private struct UntisLiquidGlassCapsule: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: Capsule())
+            content.glassEffect(.regular, in: Capsule())
         } else {
             content
                 .background(.ultraThinMaterial, in: Capsule())
@@ -1640,6 +1631,13 @@ private enum UntisPalette {
     static let navigationSubtitle = adaptive(light: "#919DA6", dark: "#67747E")
     static let separator = adaptive(light: "#DCDFE5", dark: "#414D55")
     static let gridLine = adaptive(light: "#E7E9EC", dark: "#303438")
+
+    // Untis dark-mode lesson cards are slate, not pastel subject-colour fills.
+    // Subject colours remain as the narrow leading accent, matching the reference UI.
+    static let lessonBackground = adaptive(light: "#EEF1F3", dark: "#333E47")
+    static let lessonBorder = adaptive(light: "#D3D9DE", dark: "#414D55")
+    static let lessonTitle = adaptive(light: "#414D55", dark: "#D5DADF")
+    static let lessonSubtitle = adaptive(light: "#687680", dark: "#C2CAD0")
 
     static let cancelledBackground = adaptive(light: "#FFF3F3", dark: "#81002E")
     static let cancelledBorder = adaptive(light: "#DF0047", dark: "#F03164")
