@@ -1,0 +1,15 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.app/
+
+# macOS
+.DS_Store
+
+# Original Android APKs are not required for the iOS build; do not commit them.
+Reference/OriginalAPKParts/*.apk
