@@ -143,11 +143,11 @@ struct ContentView: View {
         case .lessonDetail(let lesson):
             LessonDetailSheet(lesson: lesson, showRooms: showRooms)
         case .setPasscode:
-            PasscodeSheet(mode: .set, passcodes: passcodes, onSuccess: {
+            PasscodeSheet(passcodes: passcodes, mode: .set, onSuccess: {
                 activeSheet = nil
             })
         case .enterPasscode:
-            PasscodeSheet(mode: .enter, passcodes: passcodes, onSuccess: {
+            PasscodeSheet(passcodes: passcodes, mode: .enter, onSuccess: {
                 isEditMode = true
                 selectedTab = .timetable
                 activeSheet = nil
