@@ -285,10 +285,7 @@ struct ContentView: View {
 
     private var editModeBanner: some View {
         HStack(spacing: 8) {
-            Image("untis_ic_edit")
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
+            UntisIcon(asset: "untis_ic_edit", symbol: "pencil")
                 .foregroundStyle(UntisPalette.brand)
                 .frame(width: 15, height: 15)
 
@@ -317,15 +314,12 @@ struct ContentView: View {
             let indices = visibleDayIndices
             let dayWidth = max(50, (geometry.size.width - timeColumnWidth) / CGFloat(max(indices.count, 1)))
             let weekNumber = Calendar(identifier: .iso8601).component(.weekOfYear, from: selectedDate)
-            let monthFormatter = DateFormatter()
-            let _ = monthFormatter.locale = Locale.current
-            let _ = monthFormatter.dateFormat = "MMM"
 
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("W \(weekNumber)")
                         .font(.system(size: 13, weight: .semibold))
-                    Text(monthFormatter.string(from: selectedDate))
+                    Text(monthName(for: selectedDate))
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundStyle(UntisPalette.text)
@@ -506,10 +500,7 @@ struct ContentView: View {
                     }
                 } label: {
                     VStack(spacing: 4) {
-                        Image(tab.iconName)
-                            .resizable()
-                            .renderingMode(.template)
-                            .scaledToFit()
+                        UntisIcon(asset: tab.iconName, symbol: tab.symbolName)
                             .frame(width: 25, height: 25)
                             .foregroundStyle(.white)
                         Text(tab.rawValue)
@@ -563,6 +554,7 @@ struct ContentView: View {
 
     private var selectedWeekdayIndex: Int {
         let weekday = Calendar(identifier: .iso8601).component(.weekday, from: selectedDate)
+        if weekday == 1 { return 4 }   // Sunday belongs to the ISO week that ends on it
         return min(max(weekday - 2, 0), 4)
     }
 
@@ -572,6 +564,13 @@ struct ContentView: View {
         formatter.dateFormat = "d MMM"
         guard let first = weekDates.first, let last = weekDates.last else { return "This week" }
         return "\(formatter.string(from: first)) – \(formatter.string(from: last))"
+    }
+
+    private func monthName(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "MMM"
+        return formatter.string(from: date)
     }
 
     private func dayName(for date: Date) -> String {
@@ -701,10 +700,7 @@ private struct EmptyLessonCard: View {
 private struct HiddenLessonCard: View {
     var body: some View {
         VStack(spacing: 4) {
-            Image("untis_ic_eye_off")
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
+            UntisIcon(asset: "untis_ic_eye_off", symbol: "eye.slash")
                 .frame(width: 14, height: 14)
                 .foregroundStyle(UntisPalette.subtitle)
             Text("Hidden")
@@ -757,10 +753,7 @@ private struct LessonCardView: View {
         VStack(alignment: .leading, spacing: 3) {
             if lesson.status == .exam {
                 HStack(spacing: 3) {
-                    Image("untis_ic_exam")
-                        .resizable()
-                        .renderingMode(.template)
-                        .scaledToFit()
+                    UntisIcon(asset: "untis_ic_exam", symbol: "doc.text")
                         .frame(width: 8, height: 8)
                     Text("EXAM / INFO")
                         .font(.system(size: 6.5, weight: .bold))
@@ -769,10 +762,7 @@ private struct LessonCardView: View {
                 .foregroundStyle(UntisPalette.examBorder)
             } else if lesson.status == .cancelled {
                 HStack(spacing: 3) {
-                    Image("untis_ic_cancel_lesson")
-                        .resizable()
-                        .renderingMode(.template)
-                        .scaledToFit()
+                    UntisIcon(asset: "untis_ic_cancel_lesson", symbol: "xmark.circle")
                         .frame(width: 8, height: 8)
                     Text("ENTFALL")
                         .font(.system(size: 6.5, weight: .bold))
@@ -1569,9 +1559,8 @@ private struct InfoSheet: View {
             List {
                 Section {
                     HStack(spacing: 12) {
-                        Image("untis_logo_round")
-                            .resizable()
-                            .scaledToFit()
+                        UntisIcon(asset: "untis_logo_round", symbol: "graduationcap.circle.fill", template: false)
+                            .foregroundStyle(UntisPalette.brand)
                             .frame(width: 44, height: 44)
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Untis Mobile")
@@ -1595,6 +1584,27 @@ private struct InfoSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+// MARK: - Icons (bundled Untis artwork, with an SF Symbol fallback if an image is missing)
+
+private struct UntisIcon: View {
+    let asset: String
+    let symbol: String
+    var template: Bool = true
+
+    var body: some View {
+        if UIImage(named: asset) != nil {
+            Image(asset)
+                .resizable()
+                .renderingMode(template ? Image.TemplateRenderingMode.template : Image.TemplateRenderingMode.original)
+                .scaledToFit()
+        } else {
+            Image(systemName: symbol)
+                .resizable()
+                .scaledToFit()
+        }
     }
 }
 
