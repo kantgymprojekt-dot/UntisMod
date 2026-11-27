@@ -1,0 +1,15 @@
+{
+  "images": [
+    {
+      "filename": "untis_ic_prioritized_attendance.pdf",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  },
+  "properties": {
+    "preserves-vector-representation": true
+  }
+}
