@@ -1,99 +1,55 @@
-# Untis Mobile – native iOS frontend
+# Untis — native iOS frontend
 
-This is a native SwiftUI project targeting iOS 16 and later. It is an unofficial Untis client whose look is based on the Untis Mobile Android package **6.8.3 (versionCode 2467)**. It can log in to a school's WebUntis server (JSON-RPC) and also still contains the offline demo week.
+This is a native SwiftUI project targeting iOS 16 and later. It is an offline frontend reconstruction whose visual resources come only from the uploaded `Untis 6.8.3.xapk` (package `com.grupet.web.app`, version code `2467`).
 
 ## Open and run
 
-1. Open `UntisMobile.xcodeproj` in Xcode 26 or later to compile the native iOS 26 Liquid Glass API. The app deployment target remains iOS 16; earlier iOS versions use an ultra-thin material fallback.
+1. Open `UntisMobile.xcodeproj` in Xcode 26 or later.
 2. Select the `UntisMobile` scheme and an iOS 16+ simulator or device.
 3. Set your Apple development team under Signing & Capabilities.
 4. Build and run.
 
-No third-party packages are required. Without logging in, the app runs the offline demo week; with a school login it loads the real timetable from WebUntis.
+The app display name is `Untis`. No third-party packages, backend, login, network service, or database are required.
 
-## Source layout
+## Changes in this revision
 
-| File | Purpose |
-| --- | --- |
-| `UntisCloneApp.swift` | App entry point |
-| `ContentView.swift` | Main screen, header, menus, date strip, Home and Profile tabs |
-| `TimetableGrid.swift` | Timetable grid, pinch-to-zoom, swiping, lesson badges |
-| `LessonDetailView.swift` | Lesson detail page (opaque Untis-style page, no system glass sheet) |
-| `LoginView.swift` | School search and login |
-| `AppModel.swift` | Live Untis state: session, week cache, class selection, JSON-to-entry conversion |
-| `UntisAPI.swift` | WebUntis JSON-RPC client and keychain wrapper |
-| `Models.swift` | Demo data, edit-code store, calendar helpers, display model |
-| `Sheets.swift` | Editor, edit code, date picker, class picker, options, help, info |
-| `Theme.swift` | Palette, colour helpers, icons, formatters |
+- Restored the first three-dot-menu action: `Set code` before a code is saved, then `Enter code` afterward.
+- Removed the class chooser interaction; `08B` is now a static class label.
+- The timetable menu contains no Refresh or Zoom buttons. Pinch-to-zoom remains available directly on the timetable.
+- Added animated horizontal paging: swipe left/right to move forward/backward, using a sliding transition.
+- Only the real current day/date is orange. Other day/date labels remain white in dark appearance.
+- Normal lesson cards use the XAPK-style slate surface. Cancelled, room-change/substitution, and exam cards use their own status fills.
+- Teacher abbreviation/name text uses a higher-contrast secondary text colour and is always rendered; an empty replacement-teacher field falls back to the original teacher, and shows an em dash only if both are empty.
+- Exam cards always display the exam/info label and an info line; an empty info field gets a visible fallback. The default sample week includes an exam in the Thursday timetable as a visual test case.
+- The AppIcon and in-app logos are refreshed from the current XAPK's `icon.png` and `mipmap` launcher assets. Exam cards use a compact layout so the status, teacher, room, and a one-line info hint fit inside the period row.
+- Preserved native iOS 26 Liquid Glass with the interactive press response on the bottom navigation capsule, plus the iOS 16–25 material fallback.
+- Exactly three bottom tabs remain: Home, Timetable, and Profile.
 
-## Untis login (JSON-RPC)
+## Existing functionality retained
 
-- The Profile tab (and the first launch) offers **Log in**. Search for the school, then enter the WebUntis user name and password.
-- Schools are found through `mobile.webuntis.com/ms/schoolquery2` (`searchSchool`); the session uses `https://<server>/WebUntis/jsonrpc.do?school=<loginName>` with `authenticate`, `getTimegridUnits`, `getKlassen` and `getTimetable`.
-- The password is stored in the iOS keychain, never in `UserDefaults`. If the Untis session expires, the app signs in again once and retries.
-- The title in the timetable header opens the class picker; **My timetable** returns to the logged-in account. If a school does not allow students to call `getKlassen`, the picker shows the server's error and **My timetable** still works.
-- Live data is read-only. The edit code, Edit Mode and Reset only apply to the offline demo week.
-
-## Timetable behaviour
-
-- **Swipe** left or right to move by one page: one school day in Day view, the shown number of days in 2/3 Days, one week in Week view. Weekends are skipped. Pull down to refresh.
-- **Pinch** to zoom (70 % – 300 %). The zoom level is saved. The menu also has Zoom in / out / Reset.
-- **Badges** show, top to bottom, teacher, subject and room. A single period only shows its room once zoomed in (`LessonBlockView.roomZoomThreshold`, 1.3×). Double periods (adjacent identical periods are merged) always show the room.
-- **Cancelled** lessons get a red outline, a hatch pattern and strikethrough. **Exams** get a brown/amber outline with the exam icon. **Changes** (substitution, room change) get a green outline with the original value struck through.
-- Lessons that run in parallel in the same period are shown side by side.
-
-## What is implemented (original offline prototype)
-
-- A five-day timetable with a period/time rail, date strip, week navigation, and Day / 2 Days / 3 Days / Week views.
-- Exactly three bottom tabs: Home, Timetable, and Profile, using original Untis vector icons.
-- Local JSON persistence of periods and lessons in `UserDefaults`.
+- Five-day local timetable with a period/time rail and Day / 2 Days / 3 Days / Week views.
+- JSON-encoded timetable persistence in `UserDefaults`.
 - Add, edit, and delete lesson sheets.
 - Normal, cancelled, room-change, substitution, and exam/info lesson states.
-- For a cancelled lesson, choose visible strikethrough or hidden. A hidden lesson remains stored and appears as a restorable slot only while Edit Mode is active.
+- For cancelled lessons, choose visible strikethrough or hidden. Hidden lessons remain stored and can be restored in Edit Mode.
 - Original subject, teacher, and room fields for change comparisons.
-- Full-device background painting with safe-area-aware content, an iPhone full-screen layout, and iPad full-screen launch configuration.
-- Liquid Glass capsules on the floating bottom navigation and top-right information/menu controls on iOS 26+, with a translucent material fallback on iOS 16–25. The timetable cards remain in Untis styling.
-- A four-digit local edit code (demo week only). The menu shows **Set code** until a code is saved, then **Enter code**. Correct entry starts Edit Mode automatically.
-- Three incorrect attempts trigger a five-minute lockout. Attempt count and lockout expiry are persisted across launches.
+- Four-digit local edit code; three incorrect attempts trigger a five-minute lockout. Code hash, salt, attempt count, and lockout expiry are saved locally.
 - Reset to default restores the sample timetable but does not erase the edit code.
-- Local options for cancelled lessons, rooms, and subject colours.
 
-## APK-derived reference material
+## XAPK-only visual source
 
-`Reference/OriginalAPKParts/` contains the exact base and configuration APK splits supplied in this conversation. The base manifest reports package `com.grupet.web.app`, version `6.8.3`, version code `2467`.
+`UntisMobile/Assets.xcassets` uses artwork, logo variants, and icon resources extracted from the uploaded `Untis 6.8.3.xapk`. `Reference/OriginalAPKParts/`, `Reference/XAPK_Manifest.json`, `Reference/ResourceInventory.json`, and `Reference/SHA256SUMS.txt` preserve the uploaded XAPK's split APKs and provenance.
 
-`UntisMobile/Assets.xcassets` contains the original Untis vector drawable artwork converted to scalable PDF assets, the current logo images, the timetable widget preview, and widget cancellation illustrations. The original source APKs remain in `Reference` because Android XML drawables, resources.arsc, and DEX bytecode are Android-specific and cannot be compiled directly into an iOS app.
+The separately uploaded `Untis-unsigned-IPA(1).zip` contains only a compiled `Untis-unsigned.ipa` and build-info text. It contains no editable SwiftUI source and has not been used as a visual-resource source. This project is rebuilt from the prior SwiftUI source project, with the current XAPK as its only visual reference.
 
-The light/dark palette values in `ContentView.swift` are taken from the APK's `resources.arsc`, including:
+The XAPK package reports:
+- Package: `com.grupet.web.app`
+- App name: `Untis`
+- Version: `6.8.3`
+- Version code: `2467`
 
-- `untis_ui_timetableBackground`: `#F5F5F5` (light) / `#000000` (dark)
-- `untis_ui_timetableTimegridBackground`: `#FFFFFF` / `#161616`
-- `untis_ui_title`: `#414D55` / `#F3F5F7`
-- `untis_ui_orange`: `#FF6033`
-- `domain_state_cancellation_bg` / border: `#FFF3F3` / `#DF0047`
-- `domain_state_change_bg` / border: `#E4FFF3` / `#00926D`
-- `domain_state_exam_bg` / border: `#FFF7D9` / `#9F532D`
-
-The bundled `timetable_widget_preview` is the APK's widget preview. It is not a screenshot of the complete in-app timetable. The active timetable implementation is partly Compose/DEX-backed; this project is a native SwiftUI reconstruction using APK-derived resources and strings, not a byte-for-byte translation of Android runtime code.
-
-## Local storage and code-gate notes
-
-Timetable data is JSON-encoded in `UserDefaults`. The four-digit edit code is not stored as plaintext: a random salt and SHA-256 digest are stored instead. Since a four-digit code has a small search space and the app is an offline frontend, this gate is intended as an editing deterrent, not as high-assurance authentication. The lockout is enforced locally and persists across app launches.
-
-## Fidelity note
-
-This first native build uses verified APK palette values, vector icons, tab labels, timetable terminology, and status colors. Some layout measurements and lesson sample data are reconstructed because the APK's live timetable layout is partly generated by Android/Compose at runtime and the supplied APK package contains a widget preview rather than a full-screen timetable screenshot. A final pixel-level match requires comparison against the live 6.8.3 timetable screen on a device.
-
-## Build verification status
-
-The login, week loading, zoom, swiping and the new badge and detail views were written without access to Xcode, the iOS SDK or the network, so they have **not been compiled or run**, and the Untis calls have not been tried against a real school server. Build the project (Xcode, or the included GitHub Actions workflow) and fix any compiler messages first; the Untis JSON field names (`orgname`, `lstype`, `code`) are the most likely thing to need small adjustments per school.
-
-## Resource selection
-
-The app's asset catalog was generated from the supplied 6.8.3 package's non-night drawable resources and source logo/widget images. It contains the original vector artwork as scalable PDF assets; the app references the current Untis logo, navigation glyphs, menu/edit glyphs, cancellation glyph, exam glyph, and hidden-lesson glyph. The source APK splits and a resource inventory are kept under `Reference/` for auditing. Android-specific files are reference-only and are not added to the iOS target.
+The XAPK base APK's SHA-256 is recorded in `Reference/SHA256SUMS.txt`. Its UI includes Android XML and Compose-generated/runtime layouts; Android code cannot be copied directly into SwiftUI. The app is a native SwiftUI recreation using the XAPK's current resource assets and layout references. The XAPK does not bundle an individual school's live teacher roster or personal timetable; because this frontend has no backend, the built-in week uses sample teacher abbreviations, and any teacher values stored in the local lesson are now shown with a high-contrast style.
 
 ## Build an IPA from Windows with GitHub Actions
 
-A ready-to-run workflow is included at `.github/workflows/build-unsigned-ipa.yml`. It uses a GitHub-hosted macOS 26 runner with Xcode to compile a device build and package `Untis-unsigned.ipa`. The IPA must be re-signed before installing on an iPhone. See `docs/WINDOWS_GITHUB_ACTIONS_IPA.md` for the step-by-step Windows instructions. The workflow does not use signing secrets or consume a device sideload slot; installation is a separate step.
-
-Before sideloading, replace the example `PRODUCT_BUNDLE_IDENTIFIER` (`com.example.untismobileclone`) with a unique identifier for your app. Never store Apple ID passwords, signing certificates, or private keys in the repository or workflow.
+A GitHub Actions workflow is included at `.github/workflows/build-unsigned-ipa.yml`. It uses a GitHub-hosted macOS runner with Xcode to compile a device build and package `Untis-unsigned.ipa`. The IPA must be re-signed before installing on an iPhone. See `docs/WINDOWS_GITHUB_ACTIONS_IPA.md` for Windows instructions.

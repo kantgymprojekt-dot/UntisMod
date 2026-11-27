@@ -1,0 +1,67 @@
+{
+  "xapk_version": 2,
+  "package_name": "com.grupet.web.app",
+  "name": "Untis",
+  "version_code": "2467",
+  "version_name": "6.8.3",
+  "min_sdk_version": "23",
+  "target_sdk_version": "37",
+  "permissions": [
+    "android.permission.ACCESS_NOTIFICATION_POLICY",
+    "android.permission.INTERNET",
+    "android.permission.WAKE_LOCK",
+    "com.android.alarm.permission.SET_ALARM",
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.CHANGE_NETWORK_STATE",
+    "android.permission.WRITE_EXTERNAL_STORAGE",
+    "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.MODIFY_AUDIO_SETTINGS",
+    "android.permission.VIBRATE",
+    "android.permission.CAMERA",
+    "com.google.android.c2dm.permission.RECEIVE",
+    "android.permission.FOREGROUND_SERVICE",
+    "com.grupet.web.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+  ],
+  "split_configs": [
+    "config.pt",
+    "config.tvdpi",
+    "config.armeabi_v7a",
+    "config.de",
+    "config.es",
+    "config.fr"
+  ],
+  "total_size": 22769800,
+  "icon": "icon.png",
+  "split_apks": [
+    {
+      "file": "com.grupet.web.app.apk",
+      "id": "base"
+    },
+    {
+      "file": "config.pt.apk",
+      "id": "config.pt"
+    },
+    {
+      "file": "config.tvdpi.apk",
+      "id": "config.tvdpi"
+    },
+    {
+      "file": "config.armeabi_v7a.apk",
+      "id": "config.armeabi_v7a"
+    },
+    {
+      "file": "config.de.apk",
+      "id": "config.de"
+    },
+    {
+      "file": "config.es.apk",
+      "id": "config.es"
+    },
+    {
+      "file": "config.fr.apk",
+      "id": "config.fr"
+    }
+  ]
+}
