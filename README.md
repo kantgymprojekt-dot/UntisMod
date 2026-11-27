@@ -1,6 +1,6 @@
 # Untis Mobile – native iOS frontend
 
-This is a native SwiftUI project targeting iOS 16 and later. It is an offline frontend prototype based on the uploaded Untis Mobile Android package **6.8.3 (versionCode 2467)**.
+This is a native SwiftUI project targeting iOS 16 and later. It is an unofficial Untis client whose look is based on the Untis Mobile Android package **6.8.3 (versionCode 2467)**. It can log in to a school's WebUntis server (JSON-RPC) and also still contains the offline demo week.
 
 ## Open and run
 
@@ -9,9 +9,40 @@ This is a native SwiftUI project targeting iOS 16 and later. It is an offline fr
 3. Set your Apple development team under Signing & Capabilities.
 4. Build and run.
 
-No third-party packages, backend, login, network service, or database are required.
+No third-party packages are required. Without logging in, the app runs the offline demo week; with a school login it loads the real timetable from WebUntis.
 
-## What is implemented
+## Source layout
+
+| File | Purpose |
+| --- | --- |
+| `UntisCloneApp.swift` | App entry point |
+| `ContentView.swift` | Main screen, header, menus, date strip, Home and Profile tabs |
+| `TimetableGrid.swift` | Timetable grid, pinch-to-zoom, swiping, lesson badges |
+| `LessonDetailView.swift` | Lesson detail page (opaque Untis-style page, no system glass sheet) |
+| `LoginView.swift` | School search and login |
+| `AppModel.swift` | Live Untis state: session, week cache, class selection, JSON-to-entry conversion |
+| `UntisAPI.swift` | WebUntis JSON-RPC client and keychain wrapper |
+| `Models.swift` | Demo data, edit-code store, calendar helpers, display model |
+| `Sheets.swift` | Editor, edit code, date picker, class picker, options, help, info |
+| `Theme.swift` | Palette, colour helpers, icons, formatters |
+
+## Untis login (JSON-RPC)
+
+- The Profile tab (and the first launch) offers **Log in**. Search for the school, then enter the WebUntis user name and password.
+- Schools are found through `mobile.webuntis.com/ms/schoolquery2` (`searchSchool`); the session uses `https://<server>/WebUntis/jsonrpc.do?school=<loginName>` with `authenticate`, `getTimegridUnits`, `getKlassen` and `getTimetable`.
+- The password is stored in the iOS keychain, never in `UserDefaults`. If the Untis session expires, the app signs in again once and retries.
+- The title in the timetable header opens the class picker; **My timetable** returns to the logged-in account. If a school does not allow students to call `getKlassen`, the picker shows the server's error and **My timetable** still works.
+- Live data is read-only. The edit code, Edit Mode and Reset only apply to the offline demo week.
+
+## Timetable behaviour
+
+- **Swipe** left or right to move by one page: one school day in Day view, the shown number of days in 2/3 Days, one week in Week view. Weekends are skipped. Pull down to refresh.
+- **Pinch** to zoom (70 % – 300 %). The zoom level is saved. The menu also has Zoom in / out / Reset.
+- **Badges** show, top to bottom, teacher, subject and room. A single period only shows its room once zoomed in (`LessonBlockView.roomZoomThreshold`, 1.3×). Double periods (adjacent identical periods are merged) always show the room.
+- **Cancelled** lessons get a red outline, a hatch pattern and strikethrough. **Exams** get a brown/amber outline with the exam icon. **Changes** (substitution, room change) get a green outline with the original value struck through.
+- Lessons that run in parallel in the same period are shown side by side.
+
+## What is implemented (original offline prototype)
 
 - A five-day timetable with a period/time rail, date strip, week navigation, and Day / 2 Days / 3 Days / Week views.
 - Exactly three bottom tabs: Home, Timetable, and Profile, using original Untis vector icons.
@@ -22,7 +53,7 @@ No third-party packages, backend, login, network service, or database are requir
 - Original subject, teacher, and room fields for change comparisons.
 - Full-device background painting with safe-area-aware content, an iPhone full-screen layout, and iPad full-screen launch configuration.
 - Liquid Glass capsules on the floating bottom navigation and top-right information/menu controls on iOS 26+, with a translucent material fallback on iOS 16–25. The timetable cards remain in Untis styling.
-- A four-digit local edit code. The menu shows **Set code** until a code is saved, then **Enter code**. Correct entry starts Edit Mode automatically.
+- A four-digit local edit code (demo week only). The menu shows **Set code** until a code is saved, then **Enter code**. Correct entry starts Edit Mode automatically.
 - Three incorrect attempts trigger a five-minute lockout. Attempt count and lockout expiry are persisted across launches.
 - Reset to default restores the sample timetable but does not erase the edit code.
 - Local options for cancelled lessons, rooms, and subject colours.
@@ -55,7 +86,7 @@ This first native build uses verified APK palette values, vector icons, tab labe
 
 ## Build verification status
 
-The three Swift source files have been syntax-parsed with the Swift compiler frontend, the Xcode project property list passes `plutil -lint`, and every asset-catalog `Contents.json` was checked for valid JSON and referenced files. An iOS app build and simulator/device run have not been performed here because this environment does not include Xcode or the iOS SDK. Open the project in Xcode on macOS to perform the actual iOS compile and signing steps.
+The login, week loading, zoom, swiping and the new badge and detail views were written without access to Xcode, the iOS SDK or the network, so they have **not been compiled or run**, and the Untis calls have not been tried against a real school server. Build the project (Xcode, or the included GitHub Actions workflow) and fix any compiler messages first; the Untis JSON field names (`orgname`, `lstype`, `code`) are the most likely thing to need small adjustments per school.
 
 ## Resource selection
 

@@ -368,3 +368,249 @@ final class PasscodeStore: ObservableObject {
         return hash.map { String(format: "%02x", $0) }.joined()
     }
 }
+
+// MARK: - Calendar helpers (ISO weeks, Monday–Friday timetable)
+
+enum UntisCalendar {
+    static let calendar = Calendar(identifier: .iso8601)
+
+    static func startOfDay(_ date: Date) -> Date {
+        calendar.startOfDay(for: date)
+    }
+
+    /// 0 = Monday … 6 = Sunday
+    static func dayIndex(of date: Date) -> Int {
+        let weekday = calendar.component(.weekday, from: date)   // 1 = Sunday … 7 = Saturday
+        return (weekday + 5) % 7
+    }
+
+    static func isWeekend(_ date: Date) -> Bool {
+        dayIndex(of: date) >= 5
+    }
+
+    /// Saturday and Sunday move forward to the next Monday.
+    static func normalized(_ date: Date) -> Date {
+        let day = startOfDay(date)
+        switch dayIndex(of: day) {
+        case 5: return calendar.date(byAdding: .day, value: 2, to: day) ?? day
+        case 6: return calendar.date(byAdding: .day, value: 1, to: day) ?? day
+        default: return day
+        }
+    }
+
+    static func monday(of date: Date) -> Date {
+        let day = startOfDay(date)
+        return calendar.date(byAdding: .day, value: -dayIndex(of: day), to: day) ?? day
+    }
+
+    /// Moves by school days only; weekends are skipped. `count` may be negative.
+    static func addingWeekdays(_ date: Date, _ count: Int) -> Date {
+        var result = startOfDay(date)
+        let step = count >= 0 ? 1 : -1
+        var remaining = abs(count)
+        while remaining > 0 {
+            result = calendar.date(byAdding: .day, value: step, to: result) ?? result
+            if !isWeekend(result) { remaining -= 1 }
+        }
+        return result
+    }
+
+    static func addingDays(_ date: Date, _ count: Int) -> Date {
+        calendar.date(byAdding: .day, value: count, to: startOfDay(date)) ?? date
+    }
+
+    /// yyyymmdd, the date format used by the Untis JSON-RPC API.
+    static func key(_ date: Date) -> Int {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return (parts.year ?? 0) * 10_000 + (parts.month ?? 0) * 100 + (parts.day ?? 0)
+    }
+
+    static func date(fromKey key: Int) -> Date? {
+        var parts = DateComponents()
+        parts.year = key / 10_000
+        parts.month = (key / 100) % 100
+        parts.day = key % 100
+        return calendar.date(from: parts)
+    }
+
+    static func weekNumber(of date: Date) -> Int {
+        calendar.component(.weekOfYear, from: date)
+    }
+
+    /// 815 -> 495 minutes
+    static func minutes(fromHHmm value: Int) -> Int {
+        (value / 100) * 60 + value % 100
+    }
+
+    /// "08:15" -> 495 minutes
+    static func minutes(fromClock text: String) -> Int {
+        let parts = text.split(separator: ":")
+        guard parts.count == 2, let hours = Int(parts[0]), let minutes = Int(parts[1]) else { return 0 }
+        return hours * 60 + minutes
+    }
+
+    /// 815 -> "08:15"
+    static func clock(fromHHmm value: Int) -> String {
+        String(format: "%02d:%02d", value / 100, value % 100)
+    }
+}
+
+// MARK: - Unified display model (demo lessons and live Untis data both become entries)
+
+struct TimetableEntry: Identifiable, Hashable {
+    var id: String
+    var date: Date
+    var startRow: Int
+    var span: Int = 1
+
+    var subject: String = ""
+    var subjectLong: String = ""
+    var teacher: String = ""
+    var teacherLong: String = ""
+    var room: String = ""
+    var roomLong: String = ""
+    var classNames: String = ""
+
+    var status: LessonStatus = .normal
+    var originalSubject: String = ""
+    var originalTeacher: String = ""
+    var originalRoom: String = ""
+    var infoText: String = ""
+
+    var startTime: String = ""
+    var endTime: String = ""
+    var colorHex: String = "#E5F0F7"
+
+    /// Edit mode only: an empty slot that can be filled, or a cancelled lesson the user hid.
+    var isPlaceholder: Bool = false
+    var isHidden: Bool = false
+
+    var endRow: Int { startRow + span }
+
+    func hasSameContent(as other: TimetableEntry) -> Bool {
+        UntisCalendar.key(date) == UntisCalendar.key(other.date)
+            && subject == other.subject
+            && teacher == other.teacher
+            && room == other.room
+            && classNames == other.classNames
+            && status == other.status
+            && originalSubject == other.originalSubject
+            && originalTeacher == other.originalTeacher
+            && originalRoom == other.originalRoom
+            && infoText == other.infoText
+            && isPlaceholder == other.isPlaceholder
+            && isHidden == other.isHidden
+    }
+}
+
+enum EntryBuilder {
+    /// Builds the entries of the offline demo week for one date.
+    static func demoEntries(
+        for date: Date,
+        lessons: [Lesson],
+        periods: [PeriodDefinition],
+        isEditMode: Bool,
+        showCancelled: Bool
+    ) -> [TimetableEntry] {
+        let dayIndex = UntisCalendar.dayIndex(of: date)
+        guard dayIndex < 5 else { return [] }
+        let day = UntisCalendar.startOfDay(date)
+
+        var result: [TimetableEntry] = []
+        for (row, period) in periods.enumerated() {
+            if let lesson = lessons.first(where: { $0.dayIndex == dayIndex && $0.periodNumber == period.number }) {
+                let hidden = lesson.isHiddenFromTimetable || (lesson.status == .cancelled && !showCancelled)
+                if hidden && !isEditMode { continue }
+
+                var entry = TimetableEntry(id: lesson.id.uuidString, date: day, startRow: row)
+                entry.subject = lesson.subject
+                entry.teacher = lesson.teacher
+                entry.room = lesson.room
+                entry.status = lesson.status
+                entry.originalSubject = lesson.originalSubject
+                entry.originalTeacher = lesson.originalTeacher
+                entry.originalRoom = lesson.originalRoom
+                entry.infoText = lesson.infoText
+                entry.startTime = period.startTime
+                entry.endTime = period.endTime
+                entry.colorHex = lesson.subjectColorHex
+                entry.isHidden = hidden
+                result.append(entry)
+            } else if isEditMode {
+                var placeholder = TimetableEntry(id: "empty-\(dayIndex)-\(period.number)", date: day, startRow: row)
+                placeholder.startTime = period.startTime
+                placeholder.endTime = period.endTime
+                placeholder.isPlaceholder = true
+                result.append(placeholder)
+            }
+        }
+        // While editing, every period stays its own tappable slot.
+        return isEditMode ? result : mergeConsecutive(result)
+    }
+
+    /// Joins directly adjacent identical periods into one block (a double period has span 2).
+    static func mergeConsecutive(_ entries: [TimetableEntry]) -> [TimetableEntry] {
+        let sorted = entries.sorted { ($0.startRow, $0.id) < ($1.startRow, $1.id) }
+        var merged: [TimetableEntry] = []
+
+        for entry in sorted {
+            if entry.isPlaceholder || entry.isHidden {
+                merged.append(entry)
+                continue
+            }
+            if let index = merged.lastIndex(where: { $0.endRow == entry.startRow && $0.hasSameContent(as: entry) }) {
+                merged[index].span += entry.span
+                merged[index].endTime = entry.endTime
+            } else {
+                merged.append(entry)
+            }
+        }
+        return merged
+    }
+}
+
+// MARK: - Side-by-side layout for lessons that run in parallel
+
+struct PositionedEntry: Identifiable {
+    let entry: TimetableEntry
+    let column: Int
+    let columns: Int
+
+    var id: String { entry.id }
+}
+
+enum EntryLayout {
+    static func position(_ entries: [TimetableEntry]) -> [PositionedEntry] {
+        let sorted = entries.sorted { ($0.startRow, -$0.span) < ($1.startRow, -$1.span) }
+
+        var output: [PositionedEntry] = []
+        var cluster: [(entry: TimetableEntry, column: Int)] = []
+        var columnEnds: [Int] = []
+        var clusterEnd = 0
+
+        func flush() {
+            let count = max(columnEnds.count, 1)
+            for item in cluster {
+                output.append(PositionedEntry(entry: item.entry, column: item.column, columns: count))
+            }
+            cluster.removeAll()
+            columnEnds.removeAll()
+            clusterEnd = 0
+        }
+
+        for entry in sorted {
+            if !cluster.isEmpty && entry.startRow >= clusterEnd { flush() }
+
+            if let free = columnEnds.firstIndex(where: { $0 <= entry.startRow }) {
+                columnEnds[free] = entry.endRow
+                cluster.append((entry: entry, column: free))
+            } else {
+                columnEnds.append(entry.endRow)
+                cluster.append((entry: entry, column: columnEnds.count - 1))
+            }
+            clusterEnd = max(clusterEnd, entry.endRow)
+        }
+        flush()
+        return output
+    }
+}
