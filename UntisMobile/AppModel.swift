@@ -1,0 +1,505 @@
+import Foundation
+import SwiftUI
+
+// MARK: - Stored profile
+
+struct UntisProfile: Codable, Equatable {
+    var server: String
+    var school: String
+    var schoolName: String
+    var username: String
+    var personType: Int
+    var personId: Int
+    var klasseId: Int
+}
+
+/// What the timetable currently shows: a class, a teacher, or the logged-in student.
+struct TimetableElement: Codable, Equatable, Hashable {
+    var type: Int
+    var id: Int
+    var name: String
+}
+
+// MARK: - Live Untis state
+
+@MainActor
+final class AppModel: ObservableObject {
+    @Published private(set) var profile: UntisProfile?
+    @Published private(set) var element: TimetableElement?
+    @Published private(set) var livePeriods: [PeriodDefinition] = DefaultTimetable.periods
+    @Published private(set) var weeks: [Int: [TimetableEntry]] = [:]
+    @Published private(set) var loadingWeeks: Set<Int> = []
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var klassen: [UntisKlasse] = []
+    @Published private(set) var klassenError: String?
+
+    private let client = UntisClient()
+    private let defaults = UserDefaults.standard
+    private var session: UntisSession?
+    private var hasLoadedGrid = false
+
+    private static let profileKey = "untis.mobile.profile.v1"
+    private static let elementKey = "untis.mobile.element.v1"
+
+    var isLive: Bool { profile != nil }
+    var isLoading: Bool { !loadingWeeks.isEmpty }
+
+    init() {
+        if let data = defaults.data(forKey: Self.profileKey),
+           let stored = try? JSONDecoder().decode(UntisProfile.self, from: data) {
+            profile = stored
+            if let elementData = defaults.data(forKey: Self.elementKey),
+               let storedElement = try? JSONDecoder().decode(TimetableElement.self, from: elementData) {
+                element = storedElement
+            } else {
+                element = Self.ownElement(for: stored)
+            }
+        }
+    }
+
+    // MARK: Account
+
+    func searchSchools(_ term: String) async throws -> [UntisSchool] {
+        try await client.searchSchools(term)
+    }
+
+    func login(school: UntisSchool, username: String, password: String) async throws {
+        let newSession = try await client.authenticate(
+            server: school.server,
+            school: school.loginName,
+            user: username,
+            password: password
+        )
+        let newProfile = UntisProfile(
+            server: school.server,
+            school: school.loginName,
+            schoolName: school.displayName,
+            username: username,
+            personType: newSession.personType,
+            personId: newSession.personId,
+            klasseId: newSession.klasseId
+        )
+        Keychain.save(password, account: Self.keychainAccount(for: newProfile))
+
+        session = newSession
+        profile = newProfile
+        element = Self.ownElement(for: newProfile)
+        resetData()
+        persist()
+    }
+
+    func logout() {
+        let oldProfile = profile
+        let oldSession = session
+
+        if let oldProfile { Keychain.delete(account: Self.keychainAccount(for: oldProfile)) }
+        profile = nil
+        element = nil
+        session = nil
+        resetData()
+        defaults.removeObject(forKey: Self.profileKey)
+        defaults.removeObject(forKey: Self.elementKey)
+
+        if let oldSession {
+            let client = self.client
+            Task { await client.logout(oldSession) }
+        }
+    }
+
+    // MARK: Selection
+
+    var isOwnTimetableSelected: Bool {
+        guard let profile else { return false }
+        return element == Self.ownElement(for: profile)
+    }
+
+    func selectOwnTimetable() {
+        guard let profile else { return }
+        select(Self.ownElement(for: profile))
+    }
+
+    func select(_ newElement: TimetableElement) {
+        element = newElement
+        weeks = [:]
+        errorMessage = nil
+        persist()
+    }
+
+    func loadKlassen() async {
+        guard profile != nil else { return }
+        do {
+            let loaded = try await withSession { try await client.klassen($0) }
+            klassen = loaded.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            klassenError = nil
+        } catch {
+            klassenError = error.localizedDescription
+        }
+    }
+
+    // MARK: Timetable data
+
+    func entries(for date: Date) -> [TimetableEntry] {
+        let monday = UntisCalendar.key(UntisCalendar.monday(of: date))
+        let dayKey = UntisCalendar.key(date)
+        return (weeks[monday] ?? []).filter { UntisCalendar.key($0.date) == dayKey }
+    }
+
+    /// Loads every week that the given dates touch. Weeks that are already cached are skipped.
+    func ensureLoaded(for dates: [Date], force: Bool = false) async {
+        guard profile != nil, let element else { return }
+        let mondays = Set(dates.map { UntisCalendar.key(UntisCalendar.monday(of: $0)) }).sorted()
+        for key in mondays {
+            if !force, weeks[key] != nil { continue }
+            await loadWeek(mondayKey: key, element: element)
+        }
+    }
+
+    private func loadWeek(mondayKey: Int, element requested: TimetableElement) async {
+        guard let monday = UntisCalendar.date(fromKey: mondayKey) else { return }
+        let friday = UntisCalendar.addingDays(monday, 4)
+
+        loadingWeeks.insert(mondayKey)
+        defer { loadingWeeks.remove(mondayKey) }
+
+        do {
+            await loadGridIfNeeded()
+
+            // The official app reads the REST view API, which includes teachers and exams.
+            // If a school does not allow it, fall back to the JSON-RPC timetable.
+            let records: [PeriodRecord]
+            do {
+                records = try await restRecords(requested, monday: monday, friday: friday)
+            } catch let error as UntisError where error.isSessionExpired {
+                throw error
+            } catch {
+                records = try await rpcRecords(requested, monday: monday, friday: friday)
+            }
+            guard element == requested else { return }
+
+            if !hasLoadedGrid {
+                let derived = Self.derivePeriods(from: records)
+                if !derived.isEmpty { livePeriods = derived }
+            }
+            weeks[mondayKey] = Self.convert(records, periods: livePeriods)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func restRecords(_ requested: TimetableElement, monday: Date, friday: Date) async throws -> [PeriodRecord] {
+        let type: String
+        switch requested.type {
+        case 1: type = "CLASS"
+        case 2: type = "TEACHER"
+        case 3: type = "SUBJECT"
+        case 4: type = "ROOM"
+        default: type = "STUDENT"
+        }
+        let periods = try await withSession { active -> [RestPeriod] in
+            let token = await client.restToken(active)
+            return try await client.restTimetable(active, token: token, resourceType: type,
+                                                  resourceId: requested.id, from: monday, to: friday)
+        }
+        return periods.map { Self.record(from: $0) }
+    }
+
+    private func rpcRecords(_ requested: TimetableElement, monday: Date, friday: Date) async throws -> [PeriodRecord] {
+        let raw = try await withSession {
+            try await client.timetable($0, elementType: requested.type, elementId: requested.id, from: monday, to: friday)
+        }
+        return raw.enumerated().compactMap { Self.record(from: $0.element, offset: $0.offset) }
+    }
+
+    private func loadGridIfNeeded() async {
+        guard !hasLoadedGrid else { return }
+        guard let grid = try? await withSession({ try await client.timegrid($0) }) else { return }
+
+        let day = grid.first(where: { $0.day == 2 && !$0.timeUnits.isEmpty })
+            ?? grid.first(where: { !$0.timeUnits.isEmpty })
+        guard let units = day?.timeUnits.sorted(by: { $0.startTime < $1.startTime }), !units.isEmpty else { return }
+
+        livePeriods = units.enumerated().map { index, unit in
+            PeriodDefinition(
+                number: Int(unit.name) ?? index + 1,
+                startTime: UntisCalendar.clock(fromHHmm: unit.startTime),
+                endTime: UntisCalendar.clock(fromHHmm: unit.endTime)
+            )
+        }
+        hasLoadedGrid = true
+    }
+
+    // MARK: Session handling
+
+    private func currentSession() async throws -> UntisSession {
+        if let session { return session }
+        guard let profile,
+              let password = Keychain.load(account: Self.keychainAccount(for: profile)) else {
+            throw UntisError.notLoggedIn
+        }
+        let fresh = try await client.authenticate(
+            server: profile.server,
+            school: profile.school,
+            user: profile.username,
+            password: password
+        )
+        session = fresh
+        return fresh
+    }
+
+    /// Runs a call and, if the Untis session has expired, logs in again once and retries.
+    private func withSession<T>(_ work: (UntisSession) async throws -> T) async throws -> T {
+        let active = try await currentSession()
+        do {
+            return try await work(active)
+        } catch let error as UntisError where error.isSessionExpired {
+            session = nil
+            let fresh = try await currentSession()
+            return try await work(fresh)
+        }
+    }
+
+    // MARK: Helpers
+
+    private func resetData() {
+        weeks = [:]
+        loadingWeeks = []
+        errorMessage = nil
+        klassen = []
+        klassenError = nil
+        hasLoadedGrid = false
+        livePeriods = DefaultTimetable.periods
+    }
+
+    private func persist() {
+        if let profile, let data = try? JSONEncoder().encode(profile) {
+            defaults.set(data, forKey: Self.profileKey)
+        }
+        if let element, let data = try? JSONEncoder().encode(element) {
+            defaults.set(data, forKey: Self.elementKey)
+        }
+    }
+
+    private static func keychainAccount(for profile: UntisProfile) -> String {
+        "\(profile.server)|\(profile.school)|\(profile.username)"
+    }
+
+    private static func ownElement(for profile: UntisProfile) -> TimetableElement {
+        // personType: 1 class, 2 teacher, 5 student. A student without own rights falls back to the class.
+        TimetableElement(type: profile.personType == 0 ? 5 : profile.personType, id: profile.personId, name: profile.username)
+    }
+
+    // MARK: Conversion from the Untis JSON to display entries
+
+    private static let subjectPalette = ["#E5F0F7", "#FCE8E3", "#E3F5EC", "#FFF2D7", "#F0E9FA", "#E9EDF1"]
+
+    private static func colorHex(for subject: String) -> String {
+        var hash: UInt32 = 5381
+        for scalar in subject.unicodeScalars {
+            hash = (hash &* 33) &+ scalar.value
+        }
+        return subjectPalette[Int(hash % UInt32(subjectPalette.count))]
+    }
+
+    private static func joined(_ elements: [RawElement]?, long: Bool = false) -> String {
+        let names = (elements ?? []).compactMap { element -> String? in
+            let value = long ? (element.longname ?? element.name) : element.name
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        return names.joined(separator: ", ")
+    }
+
+    private static func originals(_ elements: [RawElement]?) -> String {
+        (elements ?? [])
+            .compactMap { $0.orgname }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
+    private static func derivePeriods(from records: [PeriodRecord]) -> [PeriodDefinition] {
+        var seen = Set<Int>()
+        var pairs: [(start: Int, end: Int)] = []
+        for item in records where item.endMinutes > item.startMinutes {
+            if seen.insert(item.startMinutes * 10_000 + item.endMinutes).inserted {
+                pairs.append((start: item.startMinutes, end: item.endMinutes))
+            }
+        }
+        pairs.sort { ($0.start, $0.end) < ($1.start, $1.end) }
+
+        var cleaned: [(start: Int, end: Int)] = []
+        for pair in pairs {
+            if let last = cleaned.last, pair.start < last.end { continue }
+            cleaned.append(pair)
+        }
+        return cleaned.enumerated().map { index, pair in
+            PeriodDefinition(
+                number: index + 1,
+                startTime: String(format: "%02d:%02d", pair.start / 60, pair.start % 60),
+                endTime: String(format: "%02d:%02d", pair.end / 60, pair.end % 60)
+            )
+        }
+    }
+
+    // MARK: One neutral record per period, whichever API delivered it
+
+    struct PeriodRecord {
+        var id: String
+        var date: Date
+        var startMinutes: Int
+        var endMinutes: Int
+        var startClock: String
+        var endClock: String
+        var subject = ""
+        var subjectLong = ""
+        var teacher = ""
+        var teacherLong = ""
+        var room = ""
+        var roomLong = ""
+        var classNames = ""
+        var originalSubject = ""
+        var originalTeacher = ""
+        var originalRoom = ""
+        var status: LessonStatus = .normal
+        var info = ""
+    }
+
+    private static func uniqueJoined(_ values: [String]) -> String {
+        var seen: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) { seen.append(value) }
+        return seen.joined(separator: ", ")
+    }
+
+    private static func record(from item: RestPeriod) -> PeriodRecord {
+        let start = UntisCalendar.minutes(fromClock: item.startClock)
+        let end = UntisCalendar.minutes(fromClock: item.endClock)
+        var record = PeriodRecord(
+            id: "rest-\(item.layoutId)-\(UntisCalendar.key(item.date))-\(start)",
+            date: item.date,
+            startMinutes: start,
+            endMinutes: end,
+            startClock: item.startClock,
+            endClock: item.endClock
+        )
+
+        func elements(_ type: String) -> [RestElement] { item.elements.filter { $0.type == type } }
+        func changed(_ list: [RestElement]) -> Bool {
+            list.contains { !$0.removedName.isEmpty || ["CHANGED", "SUBSTITUTED", "SUBSTITUTION", "ADDITIONAL"].contains($0.status) }
+        }
+
+        let teachers = elements("TEACHER")
+        let subjects = elements("SUBJECT")
+        let rooms = elements("ROOM")
+        let classes = elements("CLASS")
+
+        record.teacher = uniqueJoined(teachers.map { $0.name })
+        record.teacherLong = uniqueJoined(teachers.map { $0.longName })
+        record.subject = uniqueJoined(subjects.map { $0.name })
+        record.subjectLong = uniqueJoined(subjects.map { $0.longName })
+        record.room = uniqueJoined(rooms.map { $0.name })
+        record.roomLong = uniqueJoined(rooms.map { $0.longName })
+        record.classNames = uniqueJoined(classes.map { $0.name })
+        record.originalTeacher = uniqueJoined(teachers.map { $0.removedName })
+        record.originalSubject = uniqueJoined(subjects.map { $0.removedName })
+        record.originalRoom = uniqueJoined(rooms.map { $0.removedName })
+        record.info = item.notes.joined(separator: "\n")
+
+        // An exam period without a subject still shows its own name.
+        if record.subject.isEmpty, !item.title.isEmpty { record.subject = item.title }
+
+        let teacherChanged = changed(teachers)
+        let roomChanged = changed(rooms)
+        let subjectChanged = changed(subjects)
+
+        if item.status == "CANCELLED" {
+            record.status = .cancelled
+        } else if item.type == "EXAM" {
+            record.status = .exam
+        } else if item.status == "IRREGULAR" || item.status == "CHANGED" || item.status == "ADDITIONAL"
+                    || teacherChanged || roomChanged || subjectChanged {
+            record.status = (roomChanged && !teacherChanged && !subjectChanged) ? .roomChange : .substitution
+        }
+        return record
+    }
+
+    private static func record(from item: RawPeriod, offset: Int) -> PeriodRecord? {
+        guard let date = UntisCalendar.date(fromKey: item.date) else { return nil }
+        var record = PeriodRecord(
+            id: "rpc-\(item.id ?? 0)-\(item.date)-\(item.startTime)-\(offset)",
+            date: date,
+            startMinutes: UntisCalendar.minutes(fromHHmm: item.startTime),
+            endMinutes: UntisCalendar.minutes(fromHHmm: item.endTime),
+            startClock: UntisCalendar.clock(fromHHmm: item.startTime),
+            endClock: UntisCalendar.clock(fromHHmm: item.endTime)
+        )
+        record.subject = joined(item.su)
+        record.subjectLong = joined(item.su, long: true)
+        record.teacher = joined(item.te)
+        record.teacherLong = joined(item.te, long: true)
+        record.room = joined(item.ro)
+        record.roomLong = joined(item.ro, long: true)
+        record.classNames = joined(item.kl)
+        record.originalSubject = originals(item.su)
+        record.originalTeacher = originals(item.te)
+        record.originalRoom = originals(item.ro)
+
+        let teacherChanged = (item.te ?? []).contains { $0.isChanged }
+        let roomChanged = (item.ro ?? []).contains { $0.isChanged }
+        let subjectChanged = (item.su ?? []).contains { $0.isChanged }
+
+        if item.code == "cancelled" {
+            record.status = .cancelled
+        } else if item.lstype == "ex" {
+            record.status = .exam
+        } else if item.code == "irregular" || teacherChanged || roomChanged || subjectChanged {
+            record.status = (roomChanged && !teacherChanged && !subjectChanged) ? .roomChange : .substitution
+        }
+
+        var notes: [String] = []
+        for note in [item.lstext, item.substText, item.info] {
+            let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmed.isEmpty, !notes.contains(trimmed) { notes.append(trimmed) }
+        }
+        record.info = notes.joined(separator: "\n")
+        return record
+    }
+
+    private static func convert(_ records: [PeriodRecord], periods: [PeriodDefinition]) -> [TimetableEntry] {
+        let bounds = periods.map {
+            (start: UntisCalendar.minutes(fromClock: $0.startTime), end: UntisCalendar.minutes(fromClock: $0.endTime))
+        }
+
+        var byDay: [Int: [TimetableEntry]] = [:]
+
+        for item in records {
+            let rows = bounds.indices.filter { bounds[$0].start < item.endMinutes && bounds[$0].end > item.startMinutes }
+            guard let first = rows.first, let last = rows.last else { continue }
+
+            var entry = TimetableEntry(
+                id: item.id,
+                date: UntisCalendar.startOfDay(item.date),
+                startRow: first,
+                span: last - first + 1
+            )
+            entry.subject = item.subject
+            entry.subjectLong = item.subjectLong
+            entry.teacher = item.teacher
+            entry.teacherLong = item.teacherLong
+            entry.room = item.room
+            entry.roomLong = item.roomLong
+            entry.classNames = item.classNames
+            entry.status = item.status
+            entry.originalSubject = item.originalSubject
+            entry.originalTeacher = item.originalTeacher
+            entry.originalRoom = item.originalRoom
+            entry.infoText = item.info
+            entry.startTime = item.startClock
+            entry.endTime = item.endClock
+            entry.colorHex = colorHex(for: item.subject)
+
+            byDay[UntisCalendar.key(item.date), default: []].append(entry)
+        }
+
+        return byDay.values.flatMap { EntryBuilder.mergeConsecutive($0) }
+    }
+}
